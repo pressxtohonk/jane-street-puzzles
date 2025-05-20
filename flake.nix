@@ -30,6 +30,7 @@
             plotly
             protobuf
             pydantic
+            pytest
             seaborn
             scipy
             matplotlib
