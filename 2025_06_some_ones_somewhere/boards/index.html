@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Drag & Drop Squares with Removal</title>
+<style>
+  body, html {
+    margin: 0; height: 100vh; display: flex;
+    background: #f0f0f0;
+    user-select: none;
+    font-family: sans-serif;
+  }
+  #library {
+    width: 120px;
+    background: #ddd;
+    padding: 10px;
+    overflow-y: auto;
+    border-right: 2px solid #bbb;
+  }
+  #library h3 {
+    margin-top: 0;
+    font-size: 16px;
+  }
+  .lib-item {
+    height: 60px;
+    background: #4caf50;
+    color: white;
+    margin: 6px 0;
+    cursor: grab;
+    text-align: center;
+    border-radius: 4px;
+    line-height: 60px;
+    font-size: 14px;
+    user-select: none;
+    touch-action: none;
+  }
+  lib-item:active {
+    cursor: grabbing;
+  }
+  #container {
+    position: relative;
+    flex-grow: 1;
+    background:
+      linear-gradient(to right, #ccc 1px, transparent 1px),
+      linear-gradient(to bottom, #ccc 1px, transparent 1px);
+    background-size: 20px 20px;
+    width: 900px;
+    height: 900px;
+  }
+  .drag-item {
+    position: absolute;
+    background: #2196f3;
+    border-radius: 4px;
+    cursor: grab;
+    color: white;
+    font-weight: bold;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    user-select: none;
+    touch-action: none;
+  }
+  .drag-item:active {
+    cursor: grabbing;
+  }
+</style>
+</head>
+<body>
+
+<div id="library">
+  <h3>Squares</h3>
+  <!-- squares 1x1 to 9x9 -->
+</div>
+
+<div id="container"></div>
+
+<div id="data-view">
+  <textarea id="summary" style="margin-top:20px; background:#f0f0f0; padding:10px; max-height:300px; overflow:auto;"></textarea>
+  <button onclick="copySummary()">Copy</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/interactjs/dist/interact.min.js"></script>
+<script>
+  const gridSize = 20;
+  const container = document.getElementById('container');
+  const library = document.getElementById('library');
+
+  // Build library squares, draggable clones
+  for(let size=1; size<=9; size++) {
+    const libItem = document.createElement('div');
+    libItem.className = 'lib-item';
+    libItem.textContent = `${size}×${size}`;
+    library.appendChild(libItem);
+
+    interact(libItem).draggable({
+      origin: 'parent',
+      inertia: true,
+      listeners: {
+        move(event) {
+          const target = event.target;
+          let x = (parseFloat(target.getAttribute('data-x')) || 0) + event.dx;
+          let y = (parseFloat(target.getAttribute('data-y')) || 0) + event.dy;
+
+          target.style.transform = `translate(${x}px, ${y}px)`;
+          target.setAttribute('data-x', x);
+          target.setAttribute('data-y', y);
+        },
+        end(event) {
+          // On drag end, if dropped inside container, add a new square there
+          const dropX = event.page.x - container.getBoundingClientRect().left;
+          const dropY = event.page.y - container.getBoundingClientRect().top;
+
+          if (dropX >= 0 && dropY >= 0 && dropX <= container.clientWidth && dropY <= container.clientHeight) {
+            addSquare(event.target.textContent, dropX, dropY);
+          }
+
+          // Reset the dragged lib item position
+          event.target.style.transform = 'translate(0px, 0px)';
+          event.target.removeAttribute('data-x');
+          event.target.removeAttribute('data-y');
+        }
+      }
+    });
+  }
+
+  function updateSummary() {
+    const containerRect = container.getBoundingClientRect();
+    const placed = Array.from(container.querySelectorAll('.drag-item'));
+
+    const data = placed.map(el => {
+      const rect = el.getBoundingClientRect();
+      const x = Math.round((rect.left - containerRect.left) / gridSize);
+      const y = Math.round((rect.top - containerRect.top) / gridSize);
+      const text = el.textContent.trim(); // e.g., "9x9"
+      const size = parseInt(text.split('x')[0], 10);
+
+      return { size, x, y };
+    });
+
+    document.getElementById('summary').textContent = JSON.stringify(data, null, 2);
+  }
+
+  function copySummary() {
+    const summaryText = document.getElementById('summary').textContent;
+    navigator.clipboard.writeText(summaryText).then(() => {
+      alert('Copied to clipboard!');
+    }).catch(err => {
+      console.error('Copy failed:', err);
+    });
+  }
+
+  function addSquare(label, x, y) {
+    const [w, h] = label.split('×').map(Number);
+    const square = document.createElement('div');
+    square.className = 'drag-item';
+    square.textContent = label;
+    square.style.width = `${w * gridSize}px`;
+    square.style.height = `${h * gridSize}px`;
+
+    // Snap x,y to grid & clamp inside container
+    x = Math.min(Math.max(0, x - (w * gridSize) / 2), container.clientWidth - w * gridSize);
+    y = Math.min(Math.max(0, y - (h * gridSize) / 2), container.clientHeight - h * gridSize);
+
+    square.style.transform = `translate(${x}px, ${y}px)`;
+
+    container.appendChild(square);
+
+    interact(square).draggable({
+      modifiers: [
+        interact.modifiers.snap({
+          targets: [
+            interact.snappers.grid({ x: gridSize, y: gridSize })
+          ],
+          range: Infinity,
+          relativePoints: [{ x: 0, y: 0 }]
+        }),
+        interact.modifiers.restrictRect({
+          // restriction: container,
+          endOnly: false
+        })
+      ],
+      listeners: {
+        move(event) {
+          const style = window.getComputedStyle(event.target);
+          const matrix = new DOMMatrixReadOnly(style.transform);
+          let nx = matrix.m41 + event.dx;
+          let ny = matrix.m42 + event.dy;
+
+          // Allow dragging outside container bounds (for removal)
+          event.target.style.transform = `translate(${nx}px, ${ny}px)`;
+        },
+        end(event) {
+          // Remove if outside container on drag end
+          const rect = event.target.getBoundingClientRect();
+          const containerRect = container.getBoundingClientRect();
+
+          const outside = 
+            rect.right < containerRect.left ||
+            rect.left > containerRect.right ||
+            rect.bottom < containerRect.top ||
+            rect.top > containerRect.bottom;
+
+          if (outside) {
+            container.removeChild(event.target);
+          }
+
+          updateSummary();
+        }
+      }
+    });
+  }
+
+  document.getElementById('summary').addEventListener('input', () => {
+    try {
+      const data = JSON.parse(document.getElementById('summary').value);
+      renderSquaresFromData(data);
+    } catch (e) {
+      // Ignore parsing errors while typing
+      console.log(e)
+    }
+  });
+
+  function makeSquareDraggable(el) {
+    interact(el).draggable({
+      modifiers: [
+        interact.modifiers.snap({
+          targets: [interact.snappers.grid({ x: gridSize, y: gridSize })],
+          range: gridSize / 2,
+          relativePoints: [{ x: 0, y: 0 }]
+        }),
+        interact.modifiers.restrictRect({
+          restriction: container,
+          endOnly: false
+        })
+      ],
+      listeners: {
+        move(event) {
+          const target = event.target;
+          const x = (parseFloat(target.getAttribute('data-x')) || 0) + event.dx;
+          const y = (parseFloat(target.getAttribute('data-y')) || 0) + event.dy;
+
+          target.style.transform = `translate(${x}px, ${y}px)`;
+          target.setAttribute('data-x', x);
+          target.setAttribute('data-y', y);
+        },
+        end(event) {
+          const target = event.target;
+          const rect = target.getBoundingClientRect();
+          const containerRect = container.getBoundingClientRect();
+
+          const x = Math.round((rect.left - containerRect.left) / gridSize);
+          const y = Math.round((rect.top - containerRect.top) / gridSize);
+
+          const snappedX = x * gridSize;
+          const snappedY = y * gridSize;
+          target.style.transform = `translate(${snappedX}px, ${snappedY}px)`;
+          target.setAttribute('data-x', snappedX);
+          target.setAttribute('data-y', snappedY);
+
+          // Remove if dropped outside
+          const isOutside =
+            rect.right < containerRect.left ||
+            rect.left > containerRect.right ||
+            rect.bottom < containerRect.top ||
+            rect.top > containerRect.bottom;
+
+          if (isOutside) {
+            target.remove();
+          }
+
+          updateSummary();
+        }
+      }
+    });
+  }
+
+  function renderSquaresFromData(data) {
+    // Clear current squares
+    container.innerHTML = '';
+
+    data.forEach(({ size, x, y }) => {
+      console.log(x, y, size);
+      const square = document.createElement('div');
+      square.className = 'drag-item';
+      square.textContent = `${size}x${size}`;
+      square.style.width = `${size * gridSize}px`;
+      square.style.height = `${size * gridSize}px`;
+      square.style.transform = `translate(${x * gridSize}px, ${y * gridSize}px)`;
+      square.setAttribute('data-size', size);
+      container.appendChild(square);
+      makeSquareDraggable(square);
+    });
+  }
+
+</script>
+
+</body>
+</html>
+
