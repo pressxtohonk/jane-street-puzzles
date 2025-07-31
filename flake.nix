@@ -33,6 +33,7 @@
             pytest
             seaborn
             scipy
+            sympy
             matplotlib
             seaborn
             venvShellHook
